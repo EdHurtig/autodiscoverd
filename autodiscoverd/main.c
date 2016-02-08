@@ -5,116 +5,129 @@
 //  Created by Edward Hurtig on 2/6/16.
 //  Copyright © 2016 Edward Hurtig. All rights reserved.
 //
+#include "main.h"
 
-#include <stdio.h>
+int main(int argc, char *argv[]) {
+  int ret = 1;
 
-#include <stdio.h> /* printf, sprintf */
-#include <stdlib.h> /* exit */
-#include <unistd.h> /* read, write, close */
-#include <string.h> /* memcpy, memset */
-#include <sys/socket.h> /* socket, connect */
-#include <netinet/in.h> /* struct sockaddr_in, struct sockaddr */
-#include <netdb.h> /* struct hostent, gethostbyname */
+  // Only supporting port 80 at this time
+  int portno = 80;
+  char *host[10] = {"api.hurtigtechnologies.com", "ip.ht.gs",
+                    "ip.hurtigtechnologies.com", NULL};
+  char *message_fmt = "GET /hosts/?host=%s HTTP/1.0\r\nHost: %s\r\n\r\n";
 
-void error(const char *msg) { perror(msg); exit(0); }
+  char local_hostname[1024];
+  local_hostname[1023] = '\0';
+  gethostname(local_hostname, 1023);
+  printf("Local Hostname: %s\n", local_hostname);
 
-int main(int argc,char *argv[])
-{
-    /* first what are we going to send and where are we going to send it? */
-    int portno =        80;
-    char *host[10] =  { "api.hurtigtechnologies.com", "ip.ht.gs", "ip.hurtigtechnologies.com", NULL };
-    char *message_fmt = "GET /hosts/?host=%s HTTP/1.0\r\nHost: %s\r\n\r\n";
-    
-    struct hostent *server;
-    struct sockaddr_in serv_addr;
-    int sockfd, bytes, sent, received, total;
-    char message[1024],response[4096];
-    
-    char hostname[1024];
-    hostname[1023] = '\0';
-    gethostname(hostname, 1023);
-    printf("Hostname: %s\n", hostname);
-    struct hostent* h;
-    h = gethostbyname(hostname);
-    printf("h_name: %s\n", h->h_name);
-    
+  int i = -1;
+  while (host[++i] != NULL) {
+    // Build the HTTP Request
 
-    int i = -1;
-    while (host[++i] != NULL) {
-        /* fill in the parameters */
-        sprintf(message,message_fmt, hostname, host[i]);
+    request_t *r = malloc(sizeof(request_t));
 
-        /* create the socket */
-        sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            printf("ERROR opening socket\r\n");
-            continue;
-        }
-        
-        /* lookup the ip address */
-        server = gethostbyname(host[i]);
-        if (server == NULL) {
-            printf("Failed: no such host: %s\r\n", host[i]);
-            continue;
-        }
-        
-        /* fill in the structure */
-        memset(&serv_addr,0,sizeof(serv_addr));
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(portno);
-        memcpy(&serv_addr.sin_addr.s_addr,server->h_addr,server->h_length);
-        
-        /* connect the socket */
-        if (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) {
-            printf("ERROR connecting: %s\r\n", host[i]);
-            continue;
-        }
-        
-        /* send the request */
-        total = strlen(message);
-        sent = 0;
-        do {
-            bytes = write(sockfd,message+sent,total-sent);
-            if (bytes < 0) {
-                printf("ERROR writing message to socket\r\n");
-                continue;
-            }
-            if (bytes == 0)
-                break;
-            sent+=bytes;
-        } while (sent < total);
-        
-        /* receive the response */
-        memset(response,0,sizeof(response));
-        total = sizeof(response)-1;
-        received = 0;
-        do {
-            bytes = read(sockfd,response+received,total-received);
-            if (bytes < 0) {
-                printf("ERROR reading response from socket\r\n");
-                break;
-            }
-            if (bytes == 0)
-                break;
-            received+=bytes;
-        } while (received < total);
-        
-        if (received == total) {
-            printf("ERROR storing complete response from socket\r\n");
-            continue;
-        }
-        
-        /* close the socket */
-        close(sockfd);
+    sprintf(r->request_body, message_fmt, local_hostname, host[i]);
+    r->hostname = host[i];
+    r->port = 89;
 
-        /* process response */
-        if ( strstr(response, "{\"success\":true}") != NULL ) {
-            printf("Published Response to server: %s\r\n", host[i]);
-        } else {
-            printf("Failed to publish response to server: %s\r\n", host[i]);
-        }
-        
+    request_send(r);
+
+    request_recieve(r);
+
+    /* receive the response */
+
+    // Determine if it was a success
+    // Currently just checking for the string '"successs":true'
+    if (strstr(r->response_body, "\"success\":true") != NULL) {
+      printf(">> Published Response to server: %s\r\n", r->hostname);
+      ret = 0; // At lease one of the posts succeeded
+    } else {
+      printf(">> Failed to publish response to server: %s\r\n", r->hostname);
     }
-    
-    return 0;
+
+    free(r);
+  }
+  return ret;
+}
+
+int request_send(request_t *r) {
+  struct hostent *server;
+  struct sockaddr_in svr_addr;
+  int bytes, sent, received, total;
+
+  r->sockfd = socket(AF_INET, SOCK_STREAM, 0);
+
+  if (r->sockfd < 0) {
+    fprintf(stderr, "Failed: Socket Error %d\r\n", r->sockfd);
+    return -1;
+  }
+
+  /* lookup the ip address */
+  server = gethostbyname(r->hostname);
+  if (server == NULL) {
+    fprintf(stderr, "Failed: no such host: %s\r\n", r->hostname);
+    return -1;
+  }
+  fprintf(stderr, "Info: Server Address is %u.%u.%u.%u\r\n",
+          (unsigned char)server->h_addr_list[0][0],
+          (unsigned char)server->h_addr_list[0][1],
+          (unsigned char)server->h_addr_list[0][2],
+          (unsigned char)server->h_addr_list[0][3]);
+  /*s fill in the structure */
+  memset(&svr_addr, 0, sizeof(svr_addr));
+  svr_addr.sin_family = AF_INET;
+  svr_addr.sin_port = htons(r->port);
+  memcpy(&svr_addr.sin_addr.s_addr, server->h_addr, server->h_length);
+
+  /* connect the socket */
+  printf("%c\r\n", svr_addr.sin_addr.s_addr);
+
+  if (connect(r->sockfd, (struct sockaddr *)&svr_addr, sizeof(svr_addr)) < 0) {
+    fprintf(stderr, "Failed: error connecting to %s: %d\r\n", r->hostname,
+            errno);
+    return -1;
+  }
+
+  /* send the request */
+  total = strlen(r->request_body);
+  r->sent_bytes = 0;
+  do {
+    bytes = write(r->sockfd, r->request_body + r->sent_bytes,
+                  total - r->sent_bytes);
+    if (bytes < 0) {
+      printf("Failed: error writing message to socket\r\n");
+      return -1;
+    }
+    if (bytes == 0)
+      break;
+    r->sent_bytes += bytes;
+  } while (r->sent_bytes < total);
+}
+
+int request_recieve(request_t *r) {
+  memset(r->response_body, 0, sizeof(r->response_body));
+  int total, bytes;
+  total = sizeof(r->response_body) - 1;
+  r->received_bytes = 0;
+  do {
+    bytes = read(r->sockfd, r->response_body + r->received_bytes,
+                 total - r->received_bytes);
+    if (bytes < 0) {
+      printf("Failed: error reading response from socket\r\n");
+      break;
+    }
+    if (bytes == 0)
+      break;
+    r->received_bytes += bytes;
+  } while (r->received_bytes < total);
+
+  if (r->received_bytes == total) {
+    printf("Failed: error storing complete response from socket\r\n");
+    return -1;
+  }
+
+  // Close the socket
+  close(r->sockfd);
+  return 0;
 }
