@@ -103,6 +103,7 @@ int request_send(request_t *r) {
       break;
     r->sent_bytes += bytes;
   } while (r->sent_bytes < total);
+  return 0;
 }
 
 int request_recieve(request_t *r) {
