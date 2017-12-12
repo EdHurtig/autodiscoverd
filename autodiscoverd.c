@@ -12,14 +12,20 @@ int main(int argc, char *argv[]) {
 
   // Only supporting port 80 at this time
   int portno = 80;
-  char *host[10] = {"api.hurtigtechnologies.com", "ip.ht.gs",
+
+  char *host[] = {"api.hurtigtechnologies.com", "ip.ht.gs",
                     "ip.hurtigtechnologies.com", NULL};
   char *message_fmt = "GET /hosts/?host=%s HTTP/1.0\r\nHost: %s\r\n\r\n";
 
-  char local_hostname[1024];
-  local_hostname[1023] = '\0';
-  gethostname(local_hostname, 1023);
-  printf("Local Hostname: %s\n", local_hostname);
+  char local_hostname[_SC_HOST_NAME_MAX];
+  int rc = gethostname(local_hostname, _SC_HOST_NAME_MAX);
+
+  if (rc < 0) {
+    perror("Failed to get local hostname");
+    exit(1);
+  }
+
+  printf("[I] Local Hostname: %s\n", local_hostname);
 
   int i = -1;
   while (host[++i] != NULL) {
@@ -29,7 +35,7 @@ int main(int argc, char *argv[]) {
 
     sprintf(r->request_body, message_fmt, local_hostname, host[i]);
     r->hostname = host[i];
-    r->port = 89;
+    r->port = portno;
 
     request_send(r);
 
@@ -40,10 +46,10 @@ int main(int argc, char *argv[]) {
     // Determine if it was a success
     // Currently just checking for the string '"successs":true'
     if (strstr(r->response_body, "\"success\":true") != NULL) {
-      printf(">> Published Response to server: %s\r\n", r->hostname);
+      printf("[I] Published Response to server: %s\r\n", r->hostname);
       ret = 0; // At lease one of the posts succeeded
     } else {
-      printf(">> Failed to publish response to server: %s\r\n", r->hostname);
+      printf("[!] Failed to publish response to server: %s\r\n", r->hostname);
     }
 
     free(r);
@@ -51,10 +57,13 @@ int main(int argc, char *argv[]) {
   return ret;
 }
 
+/**
+ * A very basic HTTP request sender
+ */
 int request_send(request_t *r) {
   struct hostent *server;
   struct sockaddr_in svr_addr;
-  int bytes, sent, received, total;
+  int bytes, total;
 
   r->sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -69,7 +78,7 @@ int request_send(request_t *r) {
     fprintf(stderr, "Failed: no such host: %s\r\n", r->hostname);
     return -1;
   }
-  fprintf(stderr, "Info: Server Address is %u.%u.%u.%u\r\n",
+  fprintf(stderr, "[I] Server Address is %u.%u.%u.%u\r\n",
           (unsigned char)server->h_addr_list[0][0],
           (unsigned char)server->h_addr_list[0][1],
           (unsigned char)server->h_addr_list[0][2],
@@ -81,11 +90,9 @@ int request_send(request_t *r) {
   memcpy(&svr_addr.sin_addr.s_addr, server->h_addr, server->h_length);
 
   /* connect the socket */
-  printf("%c\r\n", svr_addr.sin_addr.s_addr);
-
   if (connect(r->sockfd, (struct sockaddr *)&svr_addr, sizeof(svr_addr)) < 0) {
-    fprintf(stderr, "Failed: error connecting to %s: %d\r\n", r->hostname,
-            errno);
+    perror("connect() error");
+    fprintf(stderr, "Error connecting to %s:%d\r\n", r->hostname, r->port);
     return -1;
   }
 
@@ -106,6 +113,10 @@ int request_send(request_t *r) {
   return 0;
 }
 
+
+/**
+ * A very basic HTTP request reciever
+ */
 int request_recieve(request_t *r) {
   memset(r->response_body, 0, sizeof(r->response_body));
   int total, bytes;
