@@ -5,7 +5,7 @@
 //  Created by Edward Hurtig on 2/6/16.
 //  Copyright © 2016 Edward Hurtig. All rights reserved.
 //
-#include "main.h"
+#include "autodiscoverd.h"
 
 int main(int argc, char *argv[]) {
   int ret = 1;

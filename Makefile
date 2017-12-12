@@ -1,4 +1,4 @@
-default: main
+all: autodiscoverd
 
 clean:
-	rm main
+	rm -f autodiscoverd
