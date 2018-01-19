@@ -78,7 +78,7 @@ int request_send(request_t *r) {
     fprintf(stderr, "Failed: no such host: %s\r\n", r->hostname);
     return -1;
   }
-  fprintf(stderr, "[I] Server Address is %u.%u.%u.%u\r\n",
+  printf("[I] Server Address is %u.%u.%u.%u\r\n",
           (unsigned char)server->h_addr_list[0][0],
           (unsigned char)server->h_addr_list[0][1],
           (unsigned char)server->h_addr_list[0][2],
